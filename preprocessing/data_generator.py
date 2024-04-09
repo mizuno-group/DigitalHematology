@@ -12,7 +12,9 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+from glob import glob
 from PIL import Image
+from tqdm import tqdm
 
 # %% Basic functions
 def fixCell2Bg(sample=None, mask=None, bg=None, tlX=None, tlY=None):
@@ -26,6 +28,11 @@ def fixCell2Bg(sample=None, mask=None, bg=None, tlX=None, tlY=None):
     brY, brX = min(tlY + sampleH, bgH), min(tlX + sampleW, bgW) # the bottom right corner
     bgRegionToBeReplaced = bg[tlY : brY, tlX : brX, :]
     bgRegTBRh, bgRegTBRw, _ = bgRegionToBeReplaced.shape # size after boundary consideration
+
+    mask = np.array(mask,dtype=np.uint8)
+    if len(mask.shape) == 3:
+        mask = np.where(mask.mean(axis=-1)>0,1,0) # Convert to binary
+
     mask_on_region = mask[0:bgRegTBRh, 0:bgRegTBRw]
 
     bgRegionToBeReplaced[mask_on_region==1]=[0,0,0]
@@ -84,9 +91,23 @@ def datasetMeanStd(dataDir=None):
     
     return meanOfImg, std
 
+# Add margin
+def add_margin(pil_img, margin, color):
+    top = margin[0]
+    right = margin[1]
+    bottom = margin[2]
+    left = margin[3]
+    width, height = pil_img.size
+    new_width = width + right + left
+    new_height = height + top + bottom
+    result = Image.new(pil_img.mode, (new_width, new_height), color)
+    result.paste(pil_img, (left, top))
+    return result
+
+
 # %% Pipeline
-def gen_single(rbc_candi:list,random_sets:list,bgH=1000,bgW=1000,sampleH=30,sampleW=30,n_iter=10000,n_cells=500,tol=40):
-    bg = np.ones((bgH,bgW,3))*255 # Blank image
+def gen_bg_single(rbc_candi:list,random_sets:list,bgH=1000,bgW=1000,sampleH=30,sampleW=30,n_iter=10000,n_cells=500,tol=40):
+    bg = np.ones((bgH,bgW,3))*255  # blank image
     bg = np.array(bg,dtype=np.uint8)
 
     cell_count = 0
@@ -96,11 +117,11 @@ def gen_single(rbc_candi:list,random_sets:list,bgH=1000,bgW=1000,sampleH=30,samp
         random.seed(random_sets[nc])
         rbc_file = random.sample(rbc_candi,1)[0]
         rbc_image = Image.open(rbc_file).convert("RGB")
-        rbc_image = rbc_image.resize((sampleW,sampleH)) # Resize
+        rbc_image = rbc_image.resize((sampleW,sampleH))  # resize
         sample = np.array(rbc_image,dtype=np.uint8)
 
         # Rotation
-        rotation_list = [0,45,90,180,225,270,315]
+        rotation_list = [0,45,90,135,180,225,270,315]
         angle = random.sample(rotation_list,1)[0]
         M = cv2.getRotationMatrix2D((sampleW//2, sampleH//2), angle, 1)
         sample = cv2.warpAffine(sample, M, (sampleW, sampleH))
@@ -110,7 +131,7 @@ def gen_single(rbc_candi:list,random_sets:list,bgH=1000,bgW=1000,sampleH=30,samp
         sum_sample = sample.sum(axis=-1)
         mask = np.where(sum_sample>0,1,0)
         mask = np.asarray(mask, dtype=np.uint8)
-
+        
         # Set location
         bgTlX = random.randint(0,bgW)
         bgTlY = random.randint(0,bgH) 
@@ -130,4 +151,129 @@ def gen_single(rbc_candi:list,random_sets:list,bgH=1000,bgW=1000,sampleH=30,samp
                 print("{} cells have been collected.".format(n_cells))
                 break
     return bg
+
+def lisc_processor(cell_pilimg,mask_pilimg,margin_size=(4,4,4,4),do_imshow=False):
+    """ Data processing for LISC dataset
+
+    There is a size difference between the image (576x720) and annotation (568x712).
+    Extend the annotation (mask) image with marginal space.
+
+    Args:
+        cell_pilimg (PIL.Image): Image file loaded with PIL.
+        mask_pilimg (PIL.Image): Annotation file loaded with PIL.
+        margin_size (tuple, optional): Margin for matching the size. Defaults to (4,4,4,4).
+        do_imshow (bool, optional): Defaults to False.
+
+    """
+    # Adjust the annotation image size
+    mask_image = add_margin(mask_pilimg, margin_size, (0, 0, 0))  # add margin
+
+    mask_array = np.array(mask_image,dtype=np.uint8)
+    cell_array = np.array(cell_pilimg,dtype=np.uint8)
+
+    # Confirm the size match
+    if cell_array.shape != mask_array.shape:
+        print("sample: {} \nmask: {}".format(sample.shape, mask_array.shape))
+        raise ValueError("Size Mismatch")
+    
+    # Extract patch that includes masked region
+    cell_posi = np.where(mask_array.sum(axis=-1)>0)
+    upper = cell_posi[0].min()
+    lower = cell_posi[0].max()
+    left = cell_posi[1].min()
+    right = cell_posi[1].max()
+
+    #crop_cell = cell_array[upper:lower,left:right,:]
+    #crop_mask = mask_array[upper:lower,left:right,:]
+    crop_cell = cell_pilimg.crop((left,upper,right,lower))
+    crop_mask = mask_pilimg.crop((left,upper,right,lower))
+
+    # Visualization
+    if do_imshow:
+        plt.imshow(crop_cell)
+        plt.show()
+        plt.imshow(crop_mask)
+        plt.show()
+
+    return crop_cell, crop_mask
+
+def affix_lisc(bg,random_sets:list,img_file_path='/Path/To/Main Dataset',
+               mask_file_path='/Path/To/Ground Truth Segmentation',
+               pos_history=None,
+               cell_type='eosi',sampleH=50,sampleW=50,n_iter=1000,n_cells=10,tol=40):
+    type_candi = ['Baso','eosi','lymp','mixt','mono','neut']
+    if cell_type not in type_candi:
+        raise ValueError('Inappropriate cell type. Choose from {}'.format(type_candi))
+    
+    # Load file path that contains image file
+    wbc_candi = sorted(list(glob(img_file_path+'/{}/*.bmp'.format(cell_type))))
+
+    cell_count = 0
+    used_ids = []
+    # Initialize the affixed cell location information
+    if pos_history is None:
+        pos_history = [(0,0)]
+    for nc in tqdm(range(n_iter)):
+        random.seed(random_sets[nc])
+        img_idx = random.randint(0,len(wbc_candi)-1)
+        wbc_file = wbc_candi[img_idx]  # Collect file path
+        cell_id = wbc_file.split('/')[-1].split('.')[0] # Extract the cell ID
+
+        wbc_mask_candi = sorted(list(glob(mask_file_path+'/{}/areaforexpert1/{}_expert*.bmp'.format(cell_type, str(cell_id)))))  # Seek the mask image corresponding to the loaded cell image.
+        if len(wbc_mask_candi)!=1:
+            print(wbc_file)
+            print(wbc_mask_candi)
+            raise ValueError("Something is wrong.")
+        # Load images
+        cell_image = Image.open(wbc_file).convert("RGB")
+        mask_image = Image.open(wbc_mask_candi[0]).convert("RGB")
+
+        # Preprocessing
+        crop_cell, crop_mask = lisc_processor(cell_image,mask_image,margin_size=(4,4,4,4),do_imshow=False)
+
+        # Resize
+        crop_cell = crop_cell.resize((sampleW,sampleH))
+        crop_mask = crop_mask.resize((sampleW,sampleH))
+
+        # Convert to array
+        sample = np.array(crop_cell,dtype=np.uint8)
+        mask = np.array(crop_mask,dtype=np.uint8)
+
+        # Rotation
+        rotation_list = [0,90,180,270]
+        angle = random.sample(rotation_list,1)[0]
+        M = cv2.getRotationMatrix2D((sampleW//2, sampleH//2), angle, 1)
+        sample = cv2.warpAffine(sample, M, (sampleW, sampleH))
+        sample = np.array(sample,dtype=np.uint8)
+
+        # Mask preparation
+        mask = cv2.warpAffine(mask, M, (sampleW, sampleH))
+        mask = np.array(mask,dtype=np.uint8)
+    
+        # Set location
+        bgW, bgH, _ = bg.shape
+        bgTlX = random.randint(0,bgW)
+        bgTlY = random.randint(0,bgH) 
+
+        # Calculate distance from the nearest point
+        tmp = [np.linalg.norm(np.array((bgTlX,bgTlY)) - np.array(t)) for t in pos_history]
+        minidx = np.argmin(tmp)
+
+        if min(tmp) < tol:
+            # Too close to already located cells.
+            pass
+        else:
+            bg, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY)
+            pos_history.append((posX,posY))
+            cell_count += 1
+            used_ids.append(cell_id)
+
+            # When you achieve the goal
+            if cell_count == n_cells:
+                print("{} cells have been collected.".format(n_cells))
+                break
+    
+    #print('Used Cells: {}'.format(used_ids))
+
+    return bg, pos_history
 
