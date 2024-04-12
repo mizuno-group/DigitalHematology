@@ -17,7 +17,7 @@ from PIL import Image
 from tqdm import tqdm
 
 # %% Basic functions
-def fixCell2Bg(sample=None, mask=None, bg=None, tlX=None, tlY=None):
+def fixCell2Bg(sample=None, mask=None, bg=None, tlX=None, tlY=None, label_matrix=None,label_v=1):
     if sample is None or mask is None or bg is None or tlX is None or tlY is None:
         raise ValueError( 'ERROR: one or more input arguments missing ' \
                'in fixSampleToBg. Aborting.' )
@@ -36,16 +36,27 @@ def fixCell2Bg(sample=None, mask=None, bg=None, tlX=None, tlY=None):
     mask_on_region = mask[0:bgRegTBRh, 0:bgRegTBRw]
 
     bgRegionToBeReplaced[mask_on_region==1]=[0,0,0]
-    boundingRegion = np.asarray(bgRegionToBeReplaced, dtype=np.uint8 )
+    boundingRegion = np.asarray(bgRegionToBeReplaced, dtype=np.uint8)
     boundingRegion = boundingRegion[0:bgRegTBRh, 0:bgRegTBRw, :]
 
     onlyObjectRegionOfSample = copy.deepcopy(sample)
     onlyObjectRegionOfSample[mask==0]=[0,0,0]
     onlyObjectRegionOfSample = onlyObjectRegionOfSample[0 : bgRegTBRh, 0 : bgRegTBRw, :]
 
-    # Fix
+    # Affix on image
     img = copy.deepcopy(bg)
     img[tlY:brY, tlX:brX, :] = onlyObjectRegionOfSample + boundingRegion
+
+    # Affix on mask
+    if label_matrix is not None:
+        objectRegionLabel = np.where(bgRegionToBeReplaced.sum(axis=-1)==0,label_v,0)
+        label_mat = copy.deepcopy(label_matrix)
+        label_mat = label_mat[tlY:brY, tlX:brX]
+        label_mat[objectRegionLabel==label_v]=0
+
+        label_matrix[tlY:brY, tlX:brX] = label_mat + objectRegionLabel
+    else:
+        label_matrix = np.where(img.sum(axis=-1)==255*3,0,1)
 
     # Center pixel of the region
     posY = round( (brY + tlY) * 0.5 )
@@ -53,7 +64,7 @@ def fixCell2Bg(sample=None, mask=None, bg=None, tlX=None, tlY=None):
     bboxH = brY - tlY
     bboxW = brX - tlX
 
-    return img, posX, posY, bboxW, bboxH
+    return img, label_matrix, posX, posY, bboxW, bboxH
 
 
 def datasetMeanStd(dataDir=None):
@@ -143,7 +154,7 @@ def gen_bg_single(rbc_candi:list,random_sets:list,bgH=1000,bgW=1000,sampleH=30,s
         if min(tmp) < tol:
             pass
         else:
-            bg, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY)
+            bg, label_matrix, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY)
             pos_history.append((posX,posY))
             cell_count += 1
 
@@ -199,9 +210,19 @@ def lisc_processor(cell_pilimg,mask_pilimg,margin_size=(4,4,4,4),do_imshow=False
 
 def affix_lisc(bg,random_sets:list,img_file_path='/Path/To/Main Dataset',
                mask_file_path='/Path/To/Ground Truth Segmentation',
-               pos_history=None,
+               pos_history=None,label_matrix=None,label_v=1,
                cell_type='eosi',sampleH=50,sampleW=50,n_iter=1000,n_cells=10,tol=40):
-    type_candi = ['Baso','eosi','lymp','mixt','mono','neut']
+    type_candi = ['Baso','eosi','lymp','mono','neut']
+
+    # These cell IDs contain multiple cells
+    multicell_ids = [['7','31'],
+                     [],
+                     ['3','20','23','33','34','45','52'],
+                     [],
+                     ['31','38','42','47']
+                     ]
+    multicells = multicell_ids[type_candi.index(cell_type)]
+
     if cell_type not in type_candi:
         raise ValueError('Inappropriate cell type. Choose from {}'.format(type_candi))
     
@@ -213,11 +234,16 @@ def affix_lisc(bg,random_sets:list,img_file_path='/Path/To/Main Dataset',
     # Initialize the affixed cell location information
     if pos_history is None:
         pos_history = [(0,0)]
-    for nc in tqdm(range(n_iter)):
+    for nc in range(n_iter):
         random.seed(random_sets[nc])
         img_idx = random.randint(0,len(wbc_candi)-1)
         wbc_file = wbc_candi[img_idx]  # Collect file path
         cell_id = wbc_file.split('/')[-1].split('.')[0] # Extract the cell ID
+        
+        # If multiple cells are included, they are not appropriate 
+        # for the present analysis and will be skipped.
+        if cell_id in multicells:
+            continue
 
         wbc_mask_candi = sorted(list(glob(mask_file_path+'/{}/areaforexpert1/{}_expert*.bmp'.format(cell_type, str(cell_id)))))  # Seek the mask image corresponding to the loaded cell image.
         if len(wbc_mask_candi)!=1:
@@ -263,17 +289,17 @@ def affix_lisc(bg,random_sets:list,img_file_path='/Path/To/Main Dataset',
             # Too close to already located cells.
             pass
         else:
-            bg, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY)
+            bg, label_mat, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY, label_matrix=label_matrix, label_v=label_v)
             pos_history.append((posX,posY))
             cell_count += 1
             used_ids.append(cell_id)
 
             # When you achieve the goal
             if cell_count == n_cells:
-                print("{} cells have been collected.".format(n_cells))
+                #print("{} cells have been collected.".format(n_cells))
                 break
     
     #print('Used Cells: {}'.format(used_ids))
 
-    return bg, pos_history
+    return bg, label_mat, pos_history
 
