@@ -50,20 +50,22 @@ def transform_common():
     return A.Compose(transforms)
 
 class MySmearDataset(Dataset):
-    def __init__(self, data_root='/workspace/HDDX/Azuma/Hematology/results/240408_PseudoSmearImage/240409_pseudo_image/240409_C7thinF_Processed', transforms=None, stage='train', compression=0.3):
+    def __init__(self, data_root='/workspace/HDDX/Azuma/Hematology/results/240408_PseudoSmearImage/240409_pseudo_image/240409_C7thinF_Processed', transforms=None, stage='train', compression=0.3, return_mask=True):
         super().__init__()
         self.data_root = data_root
         self.transforms = transforms
         self.stage = stage
 
         whole_image_path_list = sorted(list(glob(f'{self.data_root}/Image/{stage}/*.npy')))
-        whole_mask_path_list = sorted(list(glob(f'{self.data_root}/Label/{stage}/*.npy')))
-
+        
         self.image_path_list = whole_image_path_list[0:int(len(whole_image_path_list)*compression)]
-        self.mask_path_list = whole_mask_path_list[0:int(len(whole_mask_path_list)*compression)]
 
-        if len(self.image_path_list) != len(self.mask_path_list):
-            raise ValueError("The number of image and mask do not match.")
+        if return_mask:
+            whole_mask_path_list = sorted(list(glob(f'{self.data_root}/Label/{stage}/*.npy')))
+            self.mask_path_list = whole_mask_path_list[0:int(len(whole_mask_path_list)*compression)]
+
+            if len(self.image_path_list) != len(self.mask_path_list):
+                raise ValueError("The number of image and mask do not match.")
 
     def __len__(self):
         return len(self.image_path_list)
@@ -77,19 +79,60 @@ class MySmearDataset(Dataset):
         image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         image /= 255.0 # normalization
 
-        # Load masks
-        mask_mat = np.load(self.mask_path_list[index])
-        #mask_mat = np.where(mask_mat>0,1,0)  # binary mask
+
+        if return_mask:
+            # Load masks
+            mask_mat = np.load(self.mask_path_list[index])
+            #mask_mat = np.where(mask_mat>0,1,0)  # binary mask
+
+            # Transform images and masks
+            if self.transforms:
+                transformed = self.transforms(image=image, mask=mask_mat)
+                image, mask_mat = transformed['image'], transformed['mask']
+            
+            # Convert one hot vector to evaluate segmentation performance
+            mask_mat = F.one_hot(torch.tensor(mask_mat).long(), num_classes=mask_mat.max()+1)
+            mask_mat = np.array(mask_mat.permute(2,0,1))
+            
+            return image, mask_mat, image_id
+
+        else:
+            # Transform images and masks
+            if self.transforms:
+                transformed = self.transforms(image=image)
+                image = transformed['image']
+
+            return image, image_id
+
+class MySmearInfDataset(Dataset):
+    def __init__(self, data_root='/workspace/HDDX/Azuma/Hematology/results/240408_PseudoSmearImage/240409_pseudo_image/240409_C7thinF_Processed', transforms=None):
+        super().__init__()
+        self.data_root = data_root
+        self.transforms = transforms
+
+        whole_image_path_list = sorted(list(glob(f'{self.data_root}/*.npy')))
+        
+        self.image_path_list = whole_image_path_list
+
+    def __len__(self):
+        return len(self.image_path_list)
+    
+    def __getitem__(self, index):
+        # Extract IDs
+        image_id = self.image_path_list[index].split('_')[-1].split('.npy')[0]  # e.g. Img_C7thinF_890.npy >> 890
+
+        # Load images
+        image = np.load(self.image_path_list[index]).astype(np.float32)
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        image /= 255.0 # normalization
 
         # Transform images and masks
         if self.transforms:
-            transformed = self.transforms(image=image, mask=mask_mat)
-            image, mask_mat = transformed['image'], transformed['mask']
-        
-        mask_mat = F.one_hot(torch.tensor(mask_mat).long(), num_classes=mask_mat.max()+1)
-        mask_mat = np.array(mask_mat.permute(2,0,1))
-        
-        return image, mask_mat, image_id
+            transformed = self.transforms(image=image)
+            image = transformed['image']
+
+        return image, image_id
+
 
 # %%
 class DoubleConv(nn.Module):
