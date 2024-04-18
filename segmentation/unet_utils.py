@@ -50,17 +50,19 @@ def transform_common():
     return A.Compose(transforms)
 
 class MySmearDataset(Dataset):
-    def __init__(self, data_root='/workspace/HDDX/Azuma/Hematology/results/240408_PseudoSmearImage/240409_pseudo_image/240409_C7thinF_Processed', transforms=None, stage='train', compression=0.3, return_mask=True):
+    def __init__(self, data_root='/workspace/HDDX/Azuma/Hematology/results/240408_PseudoSmearImage/240409_pseudo_image/240409_C7thinF_Processed', transforms=None, stage='train', compression=0.3, return_mask=True,gray=True):
         super().__init__()
         self.data_root = data_root
         self.transforms = transforms
         self.stage = stage
+        self.return_mask = return_mask
+        self.gray = gray
 
         whole_image_path_list = sorted(list(glob(f'{self.data_root}/Image/{stage}/*.npy')))
         
         self.image_path_list = whole_image_path_list[0:int(len(whole_image_path_list)*compression)]
 
-        if return_mask:
+        if self.return_mask:
             whole_mask_path_list = sorted(list(glob(f'{self.data_root}/Label/{stage}/*.npy')))
             self.mask_path_list = whole_mask_path_list[0:int(len(whole_mask_path_list)*compression)]
 
@@ -76,11 +78,12 @@ class MySmearDataset(Dataset):
 
         # Load images
         image = np.load(self.image_path_list[index]).astype(np.float32)
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        if self.gray:
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         image /= 255.0 # normalization
 
 
-        if return_mask:
+        if self.return_mask:
             # Load masks
             mask_mat = np.load(self.mask_path_list[index])
             #mask_mat = np.where(mask_mat>0,1,0)  # binary mask
@@ -105,10 +108,11 @@ class MySmearDataset(Dataset):
             return image, image_id
 
 class MySmearInfDataset(Dataset):
-    def __init__(self, data_root='/workspace/HDDX/Azuma/Hematology/results/240408_PseudoSmearImage/240409_pseudo_image/240409_C7thinF_Processed', transforms=None):
+    def __init__(self, data_root='/workspace/HDDX/Azuma/Hematology/results/240408_PseudoSmearImage/240409_pseudo_image/240409_C7thinF_Processed', transforms=None, gray=True):
         super().__init__()
         self.data_root = data_root
         self.transforms = transforms
+        self.gray = gray
 
         whole_image_path_list = sorted(list(glob(f'{self.data_root}/*.npy')))
         
@@ -123,7 +127,8 @@ class MySmearInfDataset(Dataset):
 
         # Load images
         image = np.load(self.image_path_list[index]).astype(np.float32)
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        if self.gray:
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         image /= 255.0 # normalization
 
         # Transform images and masks
