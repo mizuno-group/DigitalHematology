@@ -173,7 +173,7 @@ def wrap_transform_multichannel(transform):
         kwargs.update(mask_to_dict)
         out = transform(*args, **kwargs)
         mask_out = np.stack([out.pop(key) for key in targets.keys()], axis=0)
-        assert mask_out.shape == mask.shape
+        assert mask_out.shape[0] == mask.shape[0]  # The number of classes should be constant.
         out["mask"] = mask_out
         return out
 
