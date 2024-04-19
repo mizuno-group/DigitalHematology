@@ -3,6 +3,7 @@ Copyright 2021, Dana-Farber Cancer Institute and Weill Cornell Medicine
 License: GNU GPL 2.0
 """
 
+import itertools
 import numpy as np
 
 
@@ -30,3 +31,25 @@ def pannuke_multiclass_mask_to_nucleus_mask(multiclass_mask):
     # ignore last channel
     out = np.sum(multiclass_mask[:-1, :, :], axis=0)
     return out
+
+def stack_mask(mask, mask_dic):
+    stack_layers = []
+    # RBC layer
+    rbc_m = min(list(itertools.chain.from_iterable(mask_dic.values())))-1
+    rbc_layer = np.where(mask<=rbc_m,mask,0)
+    stack_layers.append(rbc_layer)  # add RBC layer
+
+    # WBC layer
+    for i,k in enumerate(mask_dic):
+        tmp_labels = mask_dic.get(k)
+        tmp_layer = np.where((mask>=min(tmp_labels)) & (mask<=max(tmp_labels)),mask,0)
+        stack_layers.append(tmp_layer)  # add each WBC layer
+
+    # Background layer
+    bg_binary = np.where(mask==0,1,0)  # set -1
+    stack_layers.append(bg_binary)
+
+    # Stack and 
+    final_mask = np.stack(stack_layers)  # (C, H, W)
+
+    return final_mask

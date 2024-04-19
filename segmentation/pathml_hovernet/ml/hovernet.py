@@ -330,7 +330,7 @@ def _convert_multiclass_mask_to_binary(mask):
     Input mask of shape (B, n_classes, H, W) is converted to a mask of shape (B, 1, H, W).
     The last channel is assumed to be background, so the binary mask is computed by taking its inverse.
     """
-    m = torch.tensor(1) - mask[:, -1, :, :]
+    m = torch.tensor(1) - mask[:, -1, :, :]  # (B, W, H)
     m = m.unsqueeze(dim=1)
     return m
 
