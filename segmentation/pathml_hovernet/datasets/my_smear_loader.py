@@ -24,6 +24,7 @@ class MySmearDataset(Dataset):
         data_dir,
         transforms=None,
         stage=None,
+        compression=1.0
     ):
         self.data_dir = data_dir
         self.transforms = transforms
@@ -50,7 +51,8 @@ class MySmearDataset(Dataset):
         self.imdir = imdir
         self.maskdir = maskdir
         self.maskdictdir = maskdictdir
-        self.paths = [p.stem for p in paths]
+        paths = [p.stem for p in paths]
+        self.paths = paths[0:int(len(paths)*compression)]
     
     def __len__(self):
         return len(self.paths)
@@ -87,3 +89,54 @@ class MySmearDataset(Dataset):
 
         return out
 
+
+class MySmearInfDataset(Dataset):
+    def __init__(
+        self,
+        data_dir,
+        transforms=None,
+        stage=None,
+        compression=1.0
+    ):
+        self.data_dir = data_dir
+        self.transforms = transforms
+        self.stage=stage
+
+        data_dir = Path(data_dir)
+
+        # dirs for images
+        if self.stage is None:
+            imdir = data_dir
+        else:
+            imdir = data_dir / "{}".format(stage)
+        
+        # stop if the images directory don't already exist
+        assert imdir.is_dir(), f"Error: 'images' directory not found: {imdir}"
+
+        paths = list(imdir.glob("*"))
+
+        self.imdir = imdir
+        paths = [p.stem for p in paths]
+        self.paths = paths[0:int(len(paths)*compression)]
+    
+    def __len__(self):
+        return len(self.paths)
+
+    def __getitem__(self, ix):
+        stem = self.paths[ix].split('_')[-1]
+        impath = list(self.imdir.glob(f"*_{stem}.npy"))[0]
+
+        im = np.load(str(impath))
+
+        if self.transforms is not None:
+            transformed = self.transforms(image=im)
+            im = transformed["image"]
+
+        # swap channel dim to pytorch standard (C, H, W)
+        #im = im.transpose((2, 0, 1))
+
+        out = (
+            im
+        )
+
+        return out
