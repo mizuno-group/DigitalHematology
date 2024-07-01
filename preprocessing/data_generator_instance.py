@@ -49,15 +49,15 @@ def fixCell2Bg(sample=None, mask=None, bg=None, tlX=None, tlY=None, label_matrix
     img[tlY:brY, tlX:brX, :] = onlyObjectRegionOfSample + boundingRegion
 
     # Affix on mask
-    if label_matrix is not None:
-        objectRegionLabel = np.where(bgRegionToBeReplaced.sum(axis=-1)==0,label_v,0)
-        label_mat = copy.deepcopy(label_matrix)
-        label_mat = label_mat[tlY:brY, tlX:brX]
-        label_mat[objectRegionLabel==label_v]=0
+    if label_matrix is None:  # initial trial
+        label_matrix = np.zeros((img.shape[0],img.shape[1]), dtype=int)
 
-        label_matrix[tlY:brY, tlX:brX] = label_mat + objectRegionLabel
-    else:
-        label_matrix = np.where(img.sum(axis=-1)==255*3,0,1)
+    objectRegionLabel = np.where(bgRegionToBeReplaced.sum(axis=-1)==0,label_v,0)
+    label_mat = copy.deepcopy(label_matrix)
+    label_mat = label_mat[tlY:brY, tlX:brX]
+    label_mat[objectRegionLabel==label_v]=0
+
+    label_matrix[tlY:brY, tlX:brX] = label_mat + objectRegionLabel
 
     # Center pixel of the region
     posY = round( (brY + tlY) * 0.5 )
@@ -162,8 +162,9 @@ def lisc_processor(cell_pilimg,mask_pilimg,margin_size=(4,4,4,4),do_imshow=False
     return crop_cell, crop_mask
 
 # %% Pipeline
-def gen_bg_single(rbc_candi:list,random_sets:list,bgH=1000,bgW=1000,sampleH=30,sampleW=30,n_iter=10000,n_cells=500,tol=40):
-    bg = np.ones((bgH,bgW,3))*255  # blank image
+def gen_bg_single(rbc_candi:list,random_sets:list,bgH=1000,bgW=1000,sampleH=30,sampleW=30,n_iter=10000,n_cells=500,tol=40,bg=None):
+    if bg is None:
+        bg = np.ones((bgH,bgW,3))*255  # blank image
     bg = np.array(bg,dtype=np.uint8)
 
     cell_count = 0
@@ -200,9 +201,9 @@ def gen_bg_single(rbc_candi:list,random_sets:list,bgH=1000,bgW=1000,sampleH=30,s
             pass
         else:
             if cell_count == 0:
-                bg, label_matrix, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY, label_matrix=None)
+                bg, label_matrix, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY, label_matrix=None, label_v=cell_count+1)
             else:
-                bg, label_matrix, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY, label_matrix=label_matrix,label_v=cell_count+1)
+                bg, label_matrix, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY, label_matrix=label_matrix, label_v=cell_count+1)
 
             pos_history.append((posX,posY))
             cell_count += 1

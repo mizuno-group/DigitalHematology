@@ -25,11 +25,13 @@ class MySmearDataset(Dataset):
         transforms=None,
         stage=None,
         compression=1.0,
+        bg_label=0,
         wbc_multi=True
     ):
         self.data_dir = data_dir
         self.transforms = transforms
         self.stage = stage
+        self.bg_label = bg_label
         self.wbc_multi = wbc_multi
 
         data_dir = Path(data_dir)
@@ -69,7 +71,7 @@ class MySmearDataset(Dataset):
         mask_1c = np.load(str(maskpath))  # (H, W)
         mask_dic = pd.read_pickle(str(maskdictpath))
 
-        mask = stack_mask(mask=mask_1c, mask_dic=mask_dic, wbc_multi=self.wbc_multi)  # (C, H, W)
+        mask = stack_mask(mask=mask_1c, mask_dic=mask_dic, wbc_multi=self.wbc_multi, bg_label=self.bg_label)  # (C, H, W)
 
         if self.transforms is not None:
             transformed = self.transforms(image=im, mask=mask)
@@ -151,11 +153,13 @@ class MySmearCroppedDataset(Dataset):
         transforms=None,
         stage=None,
         compression=1.0,
+        bg_label=0,
         wbc_multi=True
     ):
         self.data_dir = data_dir
         self.transforms = transforms
         self.stage=stage
+        self.bg_label = bg_label
         self.wbc_multi=wbc_multi
 
         data_dir = Path(data_dir)
@@ -203,7 +207,7 @@ class MySmearCroppedDataset(Dataset):
         mask_1c = np.load(str(maskpath[0]))  # (H, W)
         mask_dic = pd.read_pickle(str(maskdictpath[0]))
 
-        mask = stack_mask(mask=mask_1c, mask_dic=mask_dic, wbc_multi=self.wbc_multi)  # (C, H, W)
+        mask = stack_mask(mask=mask_1c, mask_dic=mask_dic, wbc_multi=self.wbc_multi, bg_label=self.bg_label)  # (C, H, W)
 
         if self.transforms is not None:
             transformed = self.transforms(image=im, mask=mask)
