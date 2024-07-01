@@ -32,7 +32,7 @@ def pannuke_multiclass_mask_to_nucleus_mask(multiclass_mask):
     out = np.sum(multiclass_mask[:-1, :, :], axis=0)
     return out
 
-def stack_mask(mask, mask_dic, wbc_multi=True):
+def stack_mask(mask, mask_dic, wbc_multi=True, bg_label=0):
     stack_layers = []
     # RBC layer
     rbc_m = min(list(itertools.chain.from_iterable(mask_dic.values())))-1
@@ -51,7 +51,7 @@ def stack_mask(mask, mask_dic, wbc_multi=True):
         stack_layers.append(tmp_layer)  # add each WBC layer
 
     # Background layer
-    bg_binary = np.where(mask==0,1,0)  # set -1
+    bg_binary = np.where(mask==bg_label,1,0)  # set -1
     stack_layers.append(bg_binary)
 
     # Stack and 
