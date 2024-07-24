@@ -103,6 +103,22 @@ class SmearDatasetQC(Dataset):
                 else:
                     self.coords_candi.append((x,y))
 
+        if self.wbc_qc:
+            # removal of duplicates
+            new_loc = []
+            new_size_lst = [i for i in self.size_lst]
+            ap_newloc = new_loc.append
+            del_loc = new_loc.remove
+            del_size = self.size_lst.remove
+            for n, i in enumerate(self.coords_candi):
+                for j in new_loc:
+                    if np.linalg.norm(np.array(i) - np.array(j)) < 60: # Likely successful values
+                        del_size(new_size_lst[n])
+                        break
+                else:
+                    ap_newloc(i)
+            self.coords_candi = new_loc
+
         print("Total Patches: {}".format(len(self.bg_ratio_res)))
         if self.wbc_qc:
             print("Total number of WBC detected: {}".format(self.total_wbc_num))
@@ -194,4 +210,5 @@ def pickup_wbc_thresh(wsi_test, size=60, blue_thresh=150, red_thresh=150):
         else:
             ap_area([[loc[0], loc[0]+size], [loc[1], loc[1]+size]])
     pickup_wbc_lst = [i for i in area_lst if i[0][1]-i[0][0] > 3*size and i[1][1]-i[1][0] > 3*size]
+
     return pickup_wbc_lst
