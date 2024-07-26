@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Created on 2024-04-05 (Fri) 17:37:40
+Created on 2024-04-18 (Thu) 23:23:22
 
-Pseudo smear image generator for semantic segmentation.
+Pseudo smear image generator for instance segmentation.
 
 @author: I.Azuma
 """
-# %%
 import cv2
 import copy
 import random
@@ -50,15 +49,15 @@ def fixCell2Bg(sample=None, mask=None, bg=None, tlX=None, tlY=None, label_matrix
     img[tlY:brY, tlX:brX, :] = onlyObjectRegionOfSample + boundingRegion
 
     # Affix on mask
-    if label_matrix is not None:
-        objectRegionLabel = np.where(bgRegionToBeReplaced.sum(axis=-1)==0,label_v,0)
-        label_mat = copy.deepcopy(label_matrix)
-        label_mat = label_mat[tlY:brY, tlX:brX]
-        label_mat[objectRegionLabel==label_v]=0
+    if label_matrix is None:  # initial trial
+        label_matrix = np.zeros((img.shape[0],img.shape[1]), dtype=int)
 
-        label_matrix[tlY:brY, tlX:brX] = label_mat + objectRegionLabel
-    else:
-        label_matrix = np.where(img.sum(axis=-1)==255*3,0,1)
+    objectRegionLabel = np.where(bgRegionToBeReplaced.sum(axis=-1)==0,label_v,0)
+    label_mat = copy.deepcopy(label_matrix)
+    label_mat = label_mat[tlY:brY, tlX:brX]
+    label_mat[objectRegionLabel==label_v]=0
+
+    label_matrix[tlY:brY, tlX:brX] = label_mat + objectRegionLabel
 
     # Center pixel of the region
     posY = round( (brY + tlY) * 0.5 )
@@ -117,54 +116,6 @@ def add_margin(pil_img, margin, color):
     result.paste(pil_img, (left, top))
     return result
 
-
-# %% Pipeline
-def gen_bg_single(rbc_candi:list,random_sets:list,bgH=1000,bgW=1000,sampleH=30,sampleW=30,n_iter=10000,n_cells=500,tol=40):
-    bg = np.ones((bgH,bgW,3))*255  # blank image
-    bg = np.array(bg,dtype=np.uint8)
-
-    cell_count = 0
-    pos_history = [(0,0)]
-    for nc in range(n_iter):
-        # Load raw image
-        random.seed(random_sets[nc])
-        rbc_file = random.sample(rbc_candi,1)[0]
-        rbc_image = Image.open(rbc_file).convert("RGB")
-        rbc_image = rbc_image.resize((sampleW,sampleH))  # resize
-        sample = np.array(rbc_image,dtype=np.uint8)
-
-        # Rotation
-        rotation_list = [0,45,90,135,180,225,270,315]
-        angle = random.sample(rotation_list,1)[0]
-        M = cv2.getRotationMatrix2D((sampleW//2, sampleH//2), angle, 1)
-        sample = cv2.warpAffine(sample, M, (sampleW, sampleH))
-        sample = np.array(sample,dtype=np.uint8)
-
-        # Maks preparation
-        sum_sample = sample.sum(axis=-1)
-        mask = np.where(sum_sample>0,1,0)
-        mask = np.asarray(mask, dtype=np.uint8)
-        
-        # Set location
-        bgTlX = random.randint(0,bgW)
-        bgTlY = random.randint(0,bgH) 
-
-        # Calculate distance from the nearest point
-        tmp = [np.linalg.norm(np.array((bgTlX,bgTlY)) - np.array(t)) for t in pos_history]
-        minidx = np.argmin(tmp)
-
-        if min(tmp) < tol:
-            pass
-        else:
-            bg, label_matrix, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY)
-            pos_history.append((posX,posY))
-            cell_count += 1
-
-            if cell_count == n_cells:
-                print("{} cells have been collected.".format(n_cells))
-                break
-    return bg
-
 def lisc_processor(cell_pilimg,mask_pilimg,margin_size=(4,4,4,4),do_imshow=False):
     """ Data processing for LISC dataset
 
@@ -210,9 +161,62 @@ def lisc_processor(cell_pilimg,mask_pilimg,margin_size=(4,4,4,4),do_imshow=False
 
     return crop_cell, crop_mask
 
+# %% Pipeline
+def gen_bg_single(rbc_candi:list,random_sets:list,bgH=1000,bgW=1000,sampleH=30,sampleW=30,n_iter=10000,n_cells=500,tol=40,bg=None):
+    if bg is None:
+        bg = np.ones((bgH,bgW,3))*255  # blank image
+    bg = np.array(bg,dtype=np.uint8)
+
+    cell_count = 0
+    pos_history = [(0,0)]
+    for nc in range(n_iter):
+        # Load raw image
+        random.seed(random_sets[nc])
+        rbc_file = random.sample(rbc_candi,1)[0]
+        rbc_image = Image.open(rbc_file).convert("RGB")
+        rbc_image = rbc_image.resize((sampleW,sampleH))  # resize
+        sample = np.array(rbc_image,dtype=np.uint8)
+
+        # Rotation
+        rotation_list = [0,45,90,135,180,225,270,315]
+        angle = random.sample(rotation_list,1)[0]
+        M = cv2.getRotationMatrix2D((sampleW//2, sampleH//2), angle, 1)
+        sample = cv2.warpAffine(sample, M, (sampleW, sampleH))
+        sample = np.array(sample,dtype=np.uint8)
+
+        # Maks preparation
+        sum_sample = sample.sum(axis=-1)
+        mask = np.where(sum_sample>0,1,0)
+        mask = np.asarray(mask, dtype=np.uint8)
+        
+        # Set location
+        bgTlX = random.randint(0,bgW)
+        bgTlY = random.randint(0,bgH) 
+
+        # Calculate distance from the nearest point
+        tmp = [np.linalg.norm(np.array((bgTlX,bgTlY)) - np.array(t)) for t in pos_history]
+        minidx = np.argmin(tmp)
+
+        if min(tmp) < tol:
+            pass
+        else:
+            if cell_count == 0:
+                bg, label_matrix, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY, label_matrix=None, label_v=cell_count+1)
+            else:
+                bg, label_matrix, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY, label_matrix=label_matrix, label_v=cell_count+1)
+
+            pos_history.append((posX,posY))
+            cell_count += 1
+
+            if cell_count == n_cells:
+                print("{} cells have been collected.".format(n_cells))
+                break
+            
+    return bg, label_matrix
+
 def affix_lisc(bg,random_sets:list,img_file_path='/Path/To/Main Dataset',
                mask_file_path='/Path/To/Ground Truth Segmentation',
-               pos_history=None,label_matrix=None,label_v=1,
+               pos_history=None,label_matrix=None,
                cell_type='eosi',sampleH=50,sampleW=50,n_iter=1000,n_cells=10,tol=40):
     type_candi = ['Baso','eosi','lymp','mono','neut']
 
@@ -228,14 +232,19 @@ def affix_lisc(bg,random_sets:list,img_file_path='/Path/To/Main Dataset',
     if cell_type not in type_candi:
         raise ValueError('Inappropriate cell type. Choose from {}'.format(type_candi))
     
+    if label_matrix is None:
+        raise ValueError('Set label_matrix. You can obtain from the results of gen_bg_single()')
+    
     # Load file path that contains image file
     wbc_candi = sorted(list(glob(img_file_path+'/{}/*.bmp'.format(cell_type))))
 
     cell_count = 0
     used_ids = []
+    instance_label_list = []
     # Initialize the affixed cell location information
     if pos_history is None:
         pos_history = [(0,0)]
+    max_label = label_matrix.max()
     for nc in range(n_iter):
         random.seed(random_sets[nc])
         img_idx = random.randint(0,len(wbc_candi)-1)
@@ -291,10 +300,12 @@ def affix_lisc(bg,random_sets:list,img_file_path='/Path/To/Main Dataset',
             # Too close to already located cells.
             pass
         else:
+            label_v = max_label+cell_count+1
             bg, label_mat, posX, posY, bboxW, bboxH = fixCell2Bg(sample=sample, mask=mask, bg=bg, tlX=bgTlX, tlY=bgTlY, label_matrix=label_matrix, label_v=label_v)
             pos_history.append((posX,posY))
             cell_count += 1
             used_ids.append(cell_id)
+            instance_label_list.append(label_v)
 
             # When you achieve the goal
             if cell_count == n_cells:
@@ -303,5 +314,4 @@ def affix_lisc(bg,random_sets:list,img_file_path='/Path/To/Main Dataset',
     
     #print('Used Cells: {}'.format(used_ids))
 
-    return bg, label_mat, pos_history
-
+    return bg, label_mat, pos_history, instance_label_list
